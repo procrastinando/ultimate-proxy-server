@@ -1,3 +1,6 @@
+# ========================================================
+# Stage: Build Frontend
+# ========================================================
 FROM --platform=$BUILDPLATFORM node:alpine AS front-builder
 WORKDIR /app
 
@@ -6,9 +9,13 @@ RUN apk add --no-cache git && \
     git clone https://github.com/alireza0/s-ui .
 
 # Build the frontend
-WORKDIR /app/frontend
+# FIX: The correct directory for the frontend source is 'panel', not 'frontend'
+WORKDIR /app/panel
 RUN npm install && npm run build
 
+# ========================================================
+# Stage: Build Backend
+# ========================================================
 FROM golang:1.25-alpine AS backend-builder
 WORKDIR /app
 ARG TARGETARCH
@@ -32,12 +39,16 @@ ENV CC=gcc
 COPY --from=front-builder /app/ .
 
 # Copy the built frontend into the correct location for the backend build
-COPY --from=front-builder /app/frontend/dist/ /app/web/html/
+# FIX: The source path must match the corrected frontend directory 'panel'
+COPY --from=front-builder /app/panel/dist/ /app/web/html/
 
 RUN go build -ldflags="-w -s" \
     -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor" \
     -o sui main.go
 
+# ========================================================
+# Stage: Final Image of s-ui
+# ========================================================
 FROM --platform=$TARGETPLATFORM alpine
 LABEL org.opencontainers.image.authors="alireza7@gmail.com"
 ENV TZ=Asia/Tehran
