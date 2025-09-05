@@ -1,21 +1,26 @@
-# ========================================================
-# Stage: Build Frontend
-# ========================================================
+# Dockerfile
+
+# Stage 1: Build the frontend
+# This stage fetches the source code and builds the static web assets.
 FROM --platform=$BUILDPLATFORM node:alpine AS front-builder
+
+# Install git in the container, which is required to clone the repository.
+RUN apk add --no-cache git
+
 WORKDIR /app
 
-# Install git and clone the repository
-RUN apk add --no-cache git && \
-    git clone https://github.com/alireza0/s-ui .
+# Clone the repository and ALL its submodules (--recursive is key).
+# The final '.' tells git to clone into the current directory (/app).
+RUN git clone --recursive https://github.com/alireza0/s-ui.git .
 
-# Build the frontend
-# FIX: The correct directory for the frontend source is 'panel', not 'frontend'
-WORKDIR /app/panel
+# Move into the frontend directory to run npm commands.
+WORKDIR /app/frontend
+
+# Install dependencies and build the frontend.
 RUN npm install && npm run build
 
-# ========================================================
-# Stage: Build Backend
-# ========================================================
+
+# Stage 2: Build the backend Go application
 FROM golang:1.25-alpine AS backend-builder
 WORKDIR /app
 ARG TARGETARCH
@@ -35,26 +40,24 @@ RUN apk update && apk add --no-cache \
 
 ENV CC=gcc
 
-# Copy the entire cloned repository from the previous stage
+# Copy the ENTIRE cloned source code from the first stage.
 COPY --from=front-builder /app/ .
 
-# Copy the built frontend into the correct location for the backend build
-# FIX: The source path must match the corrected frontend directory 'panel'
-COPY --from=front-builder /app/panel/dist/ /app/web/html/
+# Copy the built frontend assets from the first stage into the correct web directory.
+# The source path is /app/frontend/dist because we ran the build inside that folder.
+COPY --from=front-builder /app/frontend/dist/ /app/web/html/
 
+# Build the Go binary.
 RUN go build -ldflags="-w -s" \
     -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor" \
     -o sui main.go
 
-# ========================================================
-# Stage: Final Image of s-ui
-# ========================================================
+
+# Stage 3: Create the final, minimal production image
 FROM --platform=$TARGETPLATFORM alpine
 LABEL org.opencontainers.image.authors="alireza7@gmail.com"
 ENV TZ=Asia/Tehran
 WORKDIR /app
 RUN apk add --no-cache --update ca-certificates tzdata
-COPY --from=backend-builder /app/sui /app/
-COPY --from=backend-builder /app/entrypoint.sh /app/
-VOLUME [ "s-ui" ]
-ENTRYPOINT [ "./entrypoint.sh" ]
+
+# Copy the compiled Go binary from the backend
