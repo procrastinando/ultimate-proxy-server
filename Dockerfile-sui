@@ -1,0 +1,49 @@
+FROM --platform=$BUILDPLATFORM node:alpine AS front-builder
+WORKDIR /app
+
+# Install git and clone the repository
+RUN apk add --no-cache git && \
+    git clone https://github.com/alireza0/s-ui .
+
+# Build the frontend
+WORKDIR /app/frontend
+RUN npm install && npm run build
+
+FROM golang:1.25-alpine AS backend-builder
+WORKDIR /app
+ARG TARGETARCH
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
+ENV GOARCH=$TARGETARCH
+
+RUN apk update && apk add --no-cache \
+    gcc \
+    musl-dev \
+    libc-dev \
+    make \
+    git \
+    wget \
+    unzip \
+    bash
+
+ENV CC=gcc
+
+# Copy the entire cloned repository from the previous stage
+COPY --from=front-builder /app/ .
+
+# Copy the built frontend into the correct location for the backend build
+COPY --from=front-builder /app/frontend/dist/ /app/web/html/
+
+RUN go build -ldflags="-w -s" \
+    -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor" \
+    -o sui main.go
+
+FROM --platform=$TARGETPLATFORM alpine
+LABEL org.opencontainers.image.authors="alireza7@gmail.com"
+ENV TZ=Asia/Tehran
+WORKDIR /app
+RUN apk add --no-cache --update ca-certificates tzdata
+COPY --from=backend-builder /app/sui /app/
+COPY --from=backend-builder /app/entrypoint.sh /app/
+VOLUME [ "s-ui" ]
+ENTRYPOINT [ "./entrypoint.sh" ]
