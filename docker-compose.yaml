@@ -58,8 +58,6 @@ services:
     networks:
       proxy-net:
         ipv4_address: 172.39.0.2
-      # proxy-net: # Also connect to proxy-net to find AdGuard
-      #   ipv4_address: 172.38.0.2
     restart: unless-stopped
 
   # --- Reverse Proxy and SSL ---
@@ -126,3 +124,4 @@ services:
     depends_on:
       - gluetun
     entrypoint: "./entrypoint.sh"
+
